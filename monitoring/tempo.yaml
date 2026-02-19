@@ -2,6 +2,7 @@ server:
   http_listen_port: 3200
   grpc_listen_port: 9095
 
+# Distributor receives traces/spans, passes them down to an OpenTelemetry receiver, then forwards them to the ingester
 distributor:
   receivers:
     otlp:
@@ -15,6 +16,7 @@ distributor:
         thrift_http:
           endpoint: 0.0.0.0:14268
 
+# Ingester batches up traces/spans and writes them to the TempoDB
 ingester:
   max_block_duration: 5m
 
