@@ -1,0 +1,146 @@
+// Logging configuration
+logging {
+  level  = "info"
+  format = "logfmt"
+}
+
+// OTLP (OpenTelemetry) receiver for traces
+otelcol.receiver.otlp "default" {
+  grpc {
+    endpoint = "0.0.0.0:4317"
+  }
+
+  http {
+    endpoint = "0.0.0.0:4318"
+  }
+
+  output {
+    traces  = [otelcol.processor.batch.default.input]
+    metrics = [otelcol.processor.batch.default.input]
+    logs    = [otelcol.processor.batch.default.input]
+  }
+}
+
+// Faro (Frontend Observability) receiver for Real User Monitoring of frontend client (RUM)
+// cors_allowed_origins=["https://actualdomain.com] for prod
+faro.receiver "default" {
+  server {
+    listen_address = "0.0.0.0"
+    listen_port    = 12347
+    cors_allowed_origins = ["*"]
+  }
+
+  output {
+    logs    = [loki.process.faro.receiver]
+    traces  = [otelcol.processor.batch.faro.input]
+  }
+}
+
+// Process Faro logs
+loki.process "faro" {
+  forward_to = [loki.write.default.receiver]
+}
+
+// Batch processor for Faro traces
+otelcol.processor.batch "faro" {
+  output {
+    traces = [otelcol.exporter.otlp.tempo.input]
+  }
+}
+
+// Batch processor
+otelcol.processor.batch "default" {
+  output {
+    traces  = [otelcol.exporter.otlp.tempo.input]
+    metrics = [otelcol.exporter.prometheus.default.input]
+    logs    = [otelcol.exporter.loki.default.input]
+  }
+}
+
+// Export traces to Tempo
+otelcol.exporter.otlp "tempo" {
+  client {
+    endpoint = "tempo:4317"
+    tls {
+      insecure = true
+    }
+  }
+}
+
+// Export logs to Loki
+otelcol.exporter.loki "default" {
+  forward_to = [loki.write.default.receiver]
+}
+
+loki.write "default" {
+  external_labels = {
+    job = "alloy",
+  }
+
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}
+
+// Export metrics to Prometheus format
+otelcol.exporter.prometheus "default" {
+  forward_to = [prometheus.remote_write.default.receiver]
+}
+
+prometheus.remote_write "default" {
+  endpoint {
+    url = "http://prometheus:9090/api/v1/write"
+  }
+}
+
+// Alloy scrape Tempo
+prometheus.scrape "tempo" {
+  targets = [{"__address__" = "tempo:3200"}]
+  metrics_path = "/metrics"
+  forward_to = [prometheus.remote_write.default.receiver]
+}
+
+// Scrape Keycloak metrics
+prometheus.scrape "keycloak" {
+  targets = [{"__address__" = "keycloak:9000"}]
+  metrics_path = "/metrics"
+  forward_to = [prometheus.remote_write.default.receiver]
+}
+
+// Discover Docker Containers
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+// Filter to Keycloak and apply external_labels
+discovery.relabel "keycloak" {
+  targets = discovery.docker.containers.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex = "/keycloak_service"
+    action = "keep"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    target_label = "container"
+  }
+
+  rule {
+    replacement = "keycloak"
+    target_label = "app"
+  }
+
+  rule {
+    replacement = "production"
+    target_label = "env"
+  }
+}
+
+// Tail Logs from keycloak container
+loki.source.docker "keycloak" {
+  host = "unix:///var/run/docker.sock"
+  targets = discovery.relabel.keycloak.output
+  forward_to = [loki.write.default.receiver]
+}
