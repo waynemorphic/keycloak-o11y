@@ -1,8 +1,10 @@
+partition_ring_live_store: true
+stream_over_http_enabled: true
+
 server:
   http_listen_port: 3200
   grpc_listen_port: 9095
 
-# Distributor receives traces/spans, passes them down to an OpenTelemetry receiver, then forwards them to the ingester
 distributor:
   receivers:
     otlp:
@@ -15,8 +17,6 @@ distributor:
       protocols:
         thrift_http:
           endpoint: 0.0.0.0:14268
-
-# Ingester batches up traces/spans and writes them to the TempoDB
 ingester:
   max_block_duration: 5m
 
@@ -39,6 +39,7 @@ metrics_generator:
   registry:
     external_labels:
       source: tempo
+      cluster: keycloak-o11y
   storage:
     path: /var/tempo/generator/wal
   traces_storage:
@@ -47,4 +48,5 @@ metrics_generator:
 overrides:
   defaults:
     metrics_generator:
-      processors: [service-graphs, span-metrics]
+      processors: [service-graphs, span-metrics, local-blocks]
+      generate_native_histograms: both
